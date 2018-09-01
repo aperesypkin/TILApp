@@ -1,5 +1,6 @@
 import Vapor
-import App
+@testable import App
+import Authentication
 import FluentPostgreSQL
 
 extension Application {
@@ -27,8 +28,29 @@ extension Application {
         try Application.testable(envArgs: migrateEnvironment).asyncRun().wait()
     }
     
-    func sendRequest<T: Content>(to path: String, method: HTTPMethod, headers: HTTPHeaders = .init(), body: T? = nil) throws -> Response {
+    func sendRequest<T: Content>(to path: String, method: HTTPMethod, headers: HTTPHeaders = .init(), body: T? = nil, loggedInRequest: Bool = false, loggedInUser: User? = nil) throws -> Response {
         let responder = try self.make(Responder.self)
+        
+        var headers = headers
+        if loggedInRequest || loggedInUser != nil {
+            let username: String
+            
+            if let user = loggedInUser {
+                username = user.username
+            } else {
+                username = "admin"
+            }
+            
+            let credentials = BasicAuthorization(username: username, password: "password")
+            
+            var tokenHeaders = HTTPHeaders()
+            tokenHeaders.basicAuthorization = credentials
+            
+            let tokenResponse = try sendRequest(to: "/api/users/login", method: .POST, headers: tokenHeaders)
+            
+            let token = try tokenResponse.content.syncDecode(Token.self)
+            headers.add(name: .authorization, value: "Bearer \(token.token)")
+        }
         
         let request = HTTPRequest(method: method, url: URL(string: path)!, headers: headers)
         let wrappedRequest = Request(http: request, using: self)
@@ -40,25 +62,23 @@ extension Application {
         return try responder.respond(to: wrappedRequest).wait()
     }
     
-    func sendRequest(to path: String, method: HTTPMethod, headers: HTTPHeaders = .init()) throws -> Response {
+    func sendRequest(to path: String, method: HTTPMethod, headers: HTTPHeaders = .init(), loggedInRequest: Bool = false, loggedInUser: User? = nil) throws -> Response {
         let emptyContent: EmptyContent? = nil
-        
-        return try sendRequest(to: path, method: method, headers: headers, body: emptyContent)
+        return try sendRequest(to: path, method: method, headers: headers, body: emptyContent, loggedInRequest: loggedInRequest, loggedInUser: loggedInUser)
     }
     
-    func sendRequest<T: Content>(to path: String, method: HTTPMethod, headers: HTTPHeaders, data: T) throws {
-        _ = try sendRequest(to: path, method: method, headers: headers, body: data)
+    func sendRequest<T: Content>(to path: String, method: HTTPMethod, headers: HTTPHeaders, data: T, loggedInRequest: Bool = false, loggedInUser: User? = nil) throws {
+        _ = try sendRequest(to: path, method: method, headers: headers, body: data, loggedInRequest: loggedInRequest, loggedInUser: loggedInUser)
     }
     
-    func getResponse<C: Content, T: Decodable>(to path: String, method: HTTPMethod = .GET, headers: HTTPHeaders = .init(), data: C? = nil, decodeTo type: T.Type) throws -> T {
-        let response = try sendRequest(to: path, method: method, headers: headers, body: data)
+    func getResponse<C: Content, T: Decodable>(to path: String, method: HTTPMethod = .GET, headers: HTTPHeaders = .init(), data: C? = nil, decodeTo type: T.Type, loggedInRequest: Bool = false, loggedInUser: User? = nil) throws -> T {
+        let response = try sendRequest(to: path, method: method, headers: headers, body: data, loggedInRequest: loggedInRequest, loggedInUser: loggedInUser)
         return try response.content.decode(type).wait()
     }
     
-    func getResponse<T: Decodable>(to path: String, method: HTTPMethod = .GET, headers: HTTPHeaders = .init(), decodeTo type: T.Type) throws -> T {
+    func getResponse<T: Content>(to path: String, method: HTTPMethod = .GET, headers: HTTPHeaders = .init(), decodeTo type: T.Type, loggedInRequest: Bool = false, loggedInUser: User? = nil) throws -> T {
         let emptyContent: EmptyContent? = nil
-        
-        return try getResponse(to: path, method: method, headers: headers, data: emptyContent, decodeTo: type)
+        return try getResponse(to: path, method: method, headers: headers, data: emptyContent, decodeTo: type, loggedInRequest: loggedInRequest, loggedInUser: loggedInUser)
     }
 }
 
