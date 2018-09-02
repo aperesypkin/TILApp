@@ -88,5 +88,8 @@ struct AdminUser: Migration {
     static func revert(on conn: PostgreSQLConnection) -> Future<Void> {
         return .done(on: conn)
     }
-    
 }
+
+extension User: PasswordAuthenticatable {}
+
+extension User: SessionAuthenticatable {}
